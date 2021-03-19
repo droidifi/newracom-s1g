@@ -22,9 +22,7 @@ An SD card image for a Raspberry Pi model 3 or model 4 is included in this repo
 
 # Building
 
-Clone the follwoing repositories:
-
-https://github.com/droidifi/wireless-regdb.git
+Clone the following repositories:
 
 git://git.kernel.org/pub/scm/linux/kernel/git/mcgrof/crda.git
 
