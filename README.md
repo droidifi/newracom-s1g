@@ -6,19 +6,24 @@ This repository contains the patchfiles for Newracom S1G native support.
 The components needed for native S1G suport are:
 
 Linux kernel 5.10.x 
+
 Wpa_supplicant & hostapd
+
 Wireless-regdb & CRDA
+
 Newracom driver, dtb and utility application
 
 The components can be checked out directly from the droidifi repositories. 
 
 The branch name is "linux-5.10.x-S1G" in each of the wireless-regdb, linux,
-hostap and nrc7292_sw_pkg repos.
+hostap and nrc7292_sw_pkg repos
 
-Or the original repositories can be checked out and the patchfiles in this repos
+Or the original repositories can be checked out and the patchfiles in this repo
 can be applied
 
-An SD card image for a Raspberry Pi model 3 or model 4 is included in this repo
+A ready-to-go SD card image for a Raspberry Pi model 3 or model 4 is included in this repo. 
+The SD card image automatically loads the mac80211.ko and nrc.ko modules. The cli_app is included. 
+After booting assign an IP addres to the wlan1 interface and run either wpa_supplicant or hostapd.
 
 # Building
 
@@ -65,9 +70,12 @@ Change to the linux directory
 
 Export the cross-compile variables
 
-export ARCH=arm64 
+export ARCH=arm64
+
 export CROSS_COMPILE=aarch64-linux-gnu-
+
 export CFLAGS="-march=armv8-a+crc -mtune=cortex-a72"
+
 export INSTALL_MOD_PATH=[path to mounted SD card]
 
 Run "make brcm2711_defconfig"
@@ -115,6 +123,7 @@ The newracom.dtbo file should be copied to the [path]/boot/overlays directory.
 Load the modules
 
 sudo modprobe mac80211
+
 sudo insmod /lib/modules/$(uname -r)/extra/nrc.ko fw_name=nrc7292_cspi.bin hifspeed=16000000 
 
 Adjust the driver Wi-Fi parameters
