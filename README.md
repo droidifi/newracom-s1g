@@ -119,10 +119,12 @@ Load the modules
 sudo modprobe mac80211
 sudo insmod /lib/modules/$(uname -r)/extra/nrc.ko fw_name=nrc7292_cspi.bin hifspeed=16000000 
 
-Run cli_app and adjust the Wi-Fi parameters
+Adjust the driver Wi-Fi parameters
 
 sudo cli_app set maxagg 1 8
+
 sudo cli_app set txpwr 17
+
 sudo cli_app set gi short
 
 Running the hostapd soft Access Point
