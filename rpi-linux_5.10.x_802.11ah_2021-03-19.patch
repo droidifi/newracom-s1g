@@ -1,0 +1,36 @@
+diff -urpN a/net/wireless/reg.c b/net/wireless/reg.c
+---  a/net/wireless/reg.c	2021-03-04 14:03:11.000000000 -0500
++++ b/net/wireless/reg.c	2021-03-09 11:59:21.000000000 -0500
+@@ -1936,6 +1936,10 @@ static void handle_channel(struct wiphy
+ 	const struct ieee80211_reg_rule *rrule2 = NULL;
+ 
+ 	u32 flags = chan->orig_flags;
++    
++    if(chan->band == NL80211_BAND_S1GHZ) {
++        return;
++    }
+ 
+ 	rrule = freq_reg_info(wiphy, orig_chan_freq);
+ 	if (IS_ERR(rrule)) {
+diff -urpN a/net/wireless/util.c b/net/wireless/util.c
+---  a/net/wireless/util.c	2021-03-04 14:03:11.000000000 -0500
++++ b/net/wireless/util.c	2021-03-19 01:16:05.696997984 -0400
+@@ -138,13 +138,15 @@ ieee80211_s1g_channel_width(const struct
+ }
+ EXPORT_SYMBOL(ieee80211_s1g_channel_width);
+ 
+-int ieee80211_freq_khz_to_channel(u32 freq)
++int ieee80211_freq_khz_to_channel(u32 freq_khz)
+ {
+ 	/* TODO: just handle MHz for now */
+-	freq = KHZ_TO_MHZ(freq);
++	u32 freq = KHZ_TO_MHZ(freq_khz);
+ 
++	if (freq < 1000)
++		return freq_khz;
+ 	/* see 802.11 17.3.8.3.2 and Annex J */
+-	if (freq == 2484)
++	else if (freq == 2484)
+ 		return 14;
+ 	else if (freq < 2484)
+ 		return (freq - 2407) / 5;
