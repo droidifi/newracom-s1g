@@ -44,7 +44,7 @@ Run "make && make install"
 
 Copy the public keys from the wireless-regdb repo
 
-cp <path>/wireless-regdb/*.key.pub.pem <path>/crda/pubkeys/
+cp [path]/wireless-regdb/*.key.pub.pem [path]/crda/pubkeys/
 
 Run "make && make install"
 
@@ -70,7 +70,7 @@ Export the cross-compile variables
 export ARCH=arm64 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export CFLAGS="-march=armv8-a+crc -mtune=cortex-a72"
-export INSTALL_MOD_PATH=<path to mounted SD card>
+export INSTALL_MOD_PATH=[path to mounted SD card]
 
 Run "make brcm2711_defconfig"
 
@@ -78,19 +78,19 @@ Run "make -j4 Image modules dtbs"
 
 Run "make modules_install"
 
-Copy the kernel to <sd card mount path>/boot
+Copy the kernel to [sd card mount path]/boot
 
-cp arch/arm64/boot/Image <path>/boot/kernel8.img
+cp arch/arm64/boot/Image [path]/boot/kernel8.img
 
-Copy the *.dtb files to <sd card mount path>/boot
+Copy the *.dtb files to [sd card mount path]/boot
 
-cp arch/arm64/boot/dts/broadcom/*.dtb <path>/boot/
+cp arch/arm64/boot/dts/broadcom/*.dtb [path]/boot/
 
-Copy the *.dtbo overlay files to <path>/boot/overlays/
+Copy the *.dtbo overlay files to [path]/boot/overlays/
 
-cp arch/arm64/boot/dts/overlays/*.dtbo <path>/boot/overlays/
+cp arch/arm64/boot/dts/overlays/*.dtbo [path]/boot/overlays/
 
-Edit the <path>/boot/config.txt file and add the line "arm64_bit=1"
+Edit the [path]/boot/config.txt file and add the line "arm64_bit=1"
 
 Boot the SD card and run "uname -a" to make sure you are running a 64-bit kernel
 
@@ -102,16 +102,16 @@ Make sure you have the same variables exported used to compile the kernel
 
 Export the KDIR variable set to the path to the kernel source directory
 
-export KDIR=<path to kernel source>
+export KDIR=[path to kernel source]
 
 Run "make clean && make && make modules_install"
 
-This will install the newracom nrc.ko module to the <path>/lib/modules/<kernel version> directory
+This will install the newracom nrc.ko module to the [path]/lib/modules/[kernel version] directory
 
 Please see the README file in the nrc7292_sw_pkg repo for instructions on compiling dtbo and cli_app and
 installing the firmware in the /lib/firmware directory
 
-The newracom.dtbo file should be copied to the <path>/boot/overlays directory.
+The newracom.dtbo file should be copied to the [path]/boot/overlays directory.
 
 # Running
 Load the modules
