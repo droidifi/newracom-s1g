@@ -11,9 +11,9 @@ Wpa_supplicant & hostapd
 
 Wireless-regdb & CRDA
 
-Newracom driver, dtb and utility application
+Newracom driver, dtbo file and cli_app utility application
 
-The components can be checked out directly from the droidifi repositories. 
+The components can be checked out directly from the droidifi repositories
 
 The branch name is "linux-5.10.x-S1G" in each of the wireless-regdb, linux,
 hostap and nrc7292_sw_pkg repos
@@ -21,7 +21,10 @@ hostap and nrc7292_sw_pkg repos
 Or the original repositories can be checked out and the patchfiles in this repo
 can be applied
 
-A ready-to-go SD card image for a Raspberry Pi model 3 or model 4 is included in this repo. 
+A ready-to-go SD card image for a Raspberry Pi model 3 or model 4 is available at:
+
+https://www.droidifi.com/2021-01-11-raspios-buster-armhf_newracom_8GB.img.zip 
+
 The SD card image automatically loads the mac80211.ko and nrc.ko modules. The cli_app is included. 
 After booting assign an IP addres to the wlan1 interface and run either wpa_supplicant or hostapd.
 
