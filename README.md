@@ -50,8 +50,9 @@ Run "make && make install"
 
 Copy the public keys from the wireless-regdb repo
 
+```
 cp [path]/wireless-regdb/*.key.pub.pem [path]/crda/pubkeys/
-
+```
 Run "make && make install"
 
 ## hostapd & wpa_supplicant
@@ -72,15 +73,12 @@ Install the cross-compiler via "apt install gcc-aarch64-linux-gnu"
 Change to the linux directory
 
 Export the cross-compile variables
-
+```
 export ARCH=arm64
-
 export CROSS_COMPILE=aarch64-linux-gnu-
-
 export CFLAGS="-march=armv8-a+crc -mtune=cortex-a72"
-
 export INSTALL_MOD_PATH=[path to mounted SD card]
-
+```
 Run "make brcm2711_defconfig"
 
 Run "make -j4 Image modules dtbs"
@@ -88,17 +86,17 @@ Run "make -j4 Image modules dtbs"
 Run "make modules_install"
 
 Copy the kernel to [sd card mount path]/boot
-
+```
 cp arch/arm64/boot/Image [path]/boot/kernel8.img
-
+```
 Copy the *.dtb files to [sd card mount path]/boot
-
+```
 cp arch/arm64/boot/dts/broadcom/*.dtb [path]/boot/
-
+```
 Copy the *.dtbo overlay files to [path]/boot/overlays/
-
+```
 cp arch/arm64/boot/dts/overlays/*.dtbo [path]/boot/overlays/
-
+```
 Edit the [path]/boot/config.txt file and add the line "arm64_bit=1"
 
 Boot the SD card and run "uname -a" to make sure you are running a 64-bit kernel
@@ -110,9 +108,9 @@ After cloning the nrc7292_sw_pkg repo, change to package/host/nrc_driver/source/
 Make sure you have the same variables exported used to compile the kernel
 
 Export the KDIR variable set to the path to the kernel source directory
-
+```
 export KDIR=[path to kernel source]
-
+```
 Run "make clean && make && make modules_install"
 
 This will install the newracom nrc.ko module to the [path]/lib/modules/[kernel version] directory
@@ -124,27 +122,23 @@ The newracom.dtbo file should be copied to the [path]/boot/overlays directory.
 
 # Running
 Load the modules
-
+```
 sudo modprobe mac80211
-
 sudo insmod /lib/modules/$(uname -r)/extra/nrc.ko fw_name=nrc7292_cspi.bin hifspeed=16000000 
-
+```
 Adjust the driver Wi-Fi parameters
-
+```
 sudo cli_app set maxagg 1 8
-
 sudo cli_app set txpwr 17
-
 sudo cli_app set gi short
-
+```
 Running the hostapd soft Access Point
-
-hostapd /etc/hostapd/ap_halow_sae_s1g.conf
-
+```
 ip addr add 192.168.200.1/24 dev wlan1
-
+hostapd /etc/hostapd/ap_halow_sae_s1g.conf
+```
 Running the wpa_supplicant Wi-Fi client (on a different device than hostapd)
-
+```
 ip addr add 192.168.200.2/24 dev wlan1
-
 wpa_supplicant -iwlan1 -Dnl80211 -c /etc/wpa_supplicant/sta_halow_sae_s1g.conf 
+```
