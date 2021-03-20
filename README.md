@@ -1,7 +1,7 @@
-# Description
-Newracom driver and compoments for native S1G / 802.11ah
+![Silex SX-NEWAH EVK](https://github.com/droidifi/newracom-s1g/blob/master/SX-NEWAH-new-driver.jpg)
 
-This repository contains the patchfiles for Newracom S1G native support.
+# Description
+Newracom driver and compoments for Linux native S1G / 802.11ah
 
 The components needed for native S1G suport are:
 
