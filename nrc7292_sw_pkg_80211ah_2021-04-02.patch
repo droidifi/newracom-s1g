@@ -1,0 +1,1321 @@
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/Makefile b/package/host/nrc_driver/source/nrc_driver/nrc/Makefile
+index ace9a73..1f8b34f 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/Makefile
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/Makefile
+@@ -27,8 +27,8 @@ $(M_SRC)-objs = \
+ 		nrc-dump.o \
+ 		nrc-hif-sdio.o \
+ 		nrc-bd.o \
+-		nrc-recovery.o
+-
++		nrc-recovery.o \
++		nrc-s1g.o
+ ccflags-y := \
+ 	-DDEBUG \
+ 	-DBUILD_UMAC_DRIVER \
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-bd.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-bd.c
+index c02bbf1..b546796 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-bd.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-bd.c
+@@ -83,7 +83,7 @@ static void * nrc_dump_load(int len)
+ 
+ 	filp = filp_open(filepath, O_RDONLY, 0);
+ 	if (IS_ERR(filp)) {
+-		pr_err("Failed to load borad data, error:%d",IS_ERR(filp));
++		pr_err("Failed to load board data, error:%d",IS_ERR(filp));
+ 		set_fs(old_fs);
+ 		return NULL;
+ 	}
+@@ -159,7 +159,7 @@ struct wim_bd_param * nrc_read_bd_tx_pwr(uint8_t *country_code)
+ 		cc_index = CC_TW;
+ 	else if(cc[0] == 'U' && cc[1] == 'S')
+ 		cc_index = CC_US;
+-	else if(cc[0] == 'D' && cc[1] == 'E')
++	else if(cc[0] == 'E' && cc[1] == 'U')
+ 		cc_index = CC_EU;
+ 	else if(cc[0] == 'C' && cc[1] == 'N')
+ 		cc_index = CC_CN;
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-build-config.h b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-build-config.h
+index a377e47..b5d99b2 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-build-config.h
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-build-config.h
+@@ -19,7 +19,6 @@
+ 
+ #include <linux/version.h>
+ 
+-#define NRC_BUILD_USE_HWSCAN
+ /* #define CONFIG_NRC_HIF_PRINT_BEACON */
+ /* #define CONFIG_NRC_HIF_PRINT_RX_AUTH */
+ /* #define CONFIG_NRC_HIF_PRINT_RX_DATA */
+@@ -43,6 +42,15 @@
+  * #define NRC_TARGET_KERNEL_VERSION KERNEL_VERSION(4, 4, 1)
+  */
+ #define NRC_TARGET_KERNEL_VERSION LINUX_VERSION_CODE
++#if KERNEL_VERSION(5, 10, 0) <= NRC_TARGET_KERNEL_VERSION
++#define CONFIG_S1G_CHANNEL 1
++#endif
++
++#ifdef CONFIG_S1G_CHANNEL
++#undef NRC_BUILD_USE_HWSCAN
++#else
++#define NRC_BUILD_USE_HWSCAN
++#endif
+ 
+ #if KERNEL_VERSION(4, 10, 0) <= NRC_TARGET_KERNEL_VERSION
+ #define GENL_ID_GENERATE 0
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-debug.h b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-debug.h
+index bb3df80..6e485f7 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-debug.h
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-debug.h
+@@ -26,14 +26,15 @@ enum NRC_DEBUG_MASK {
+ 	NRC_DBG_TX		= 2,
+ 	NRC_DBG_RX		= 3,
+ 	NRC_DBG_MAC		= 4,
+-	NRC_DBG_CAPI	= 5,
++	NRC_DBG_CAPI		= 5,
+ 	NRC_DBG_PS		= 6,
+-	NRC_DBG_STATS	= 7,
+-	NRC_DBG_STATE	= 8,
++	NRC_DBG_STATS		= 7,
++	NRC_DBG_STATE		= 8,
++	NRC_DBG_S1G		= 9,
+ };
+ #define NRC_DBG_MASK_ANY   (0xFFFFFFFF)
+ 
+-/*#define DEFAULT_NRC_DBG_MASK (NRC_DBG_MASK_ANY)*/
++// #define DEFAULT_NRC_DBG_MASK (NRC_DBG_MASK_ANY)
+ #define DEFAULT_NRC_DBG_MASK (BIT(NRC_DBG_PS) | BIT(NRC_DBG_STATE))
+ 
+ extern unsigned long nrc_debug_mask;
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-init.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-init.c
+index fb039e0..5a64789 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-init.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-init.c
+@@ -29,6 +29,14 @@
+ #include "wim.h"
+ #include "nrc-recovery.h"
+ 
++#ifdef CONFIG_S1G_CHANNEL
++char * fw_country = "!";
++
++module_param(fw_country, charp, 0444);
++MODULE_PARM_DESC(fw_country, "Two letter fw country code");
++
++#endif
++
+ char *fw_name;
+ 
+ module_param(fw_name, charp, 0444);
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-mac80211.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-mac80211.c
+index 07f4a9e..e244c11 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-mac80211.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-mac80211.c
+@@ -22,6 +22,7 @@
+ #include "nrc-stats.h"
+ #include "nrc-recovery.h"
+ #include "nrc-dump.h"
++#include "nrc-s1g.h"
+ #include <linux/list.h>
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+@@ -52,7 +53,7 @@
+ 	.center_freq = (_freq),				\
+ 	.hw_value = (_freq),				\
+ 	.max_power = 20,					\
+-	.center_freq_fractional = (_freq_partial) \
++	.freq_offset = (_freq_partial) \
+ }
+ 
+ #define CHAN2G(freq)			\
+@@ -81,53 +82,37 @@
+ #define FREQ_TO_100KHZ(mhz, khz) (mhz * 10 + khz / 100)
+ 
+ #if defined(CONFIG_S1G_CHANNEL)
+-static struct ieee80211_channel nrc_channels_s1ghz[] = {
+-	CHANS1G(902, 500),  /* Channel 1 */
+-	CHANS1G(903, 0),    /* Channel 2 */
+-	CHANS1G(903, 500),  /* Channel 3 */
+-	CHANS1G(904, 500),  /* Channel 5 */
+-	CHANS1G(905, 0),    /* Channel 6 */
+-	CHANS1G(905, 500),  /* Channel 7 */
+-	CHANS1G(906, 0),    /* Channel 8 */
+-	CHANS1G(906, 500),  /* Channel 9 */
+-	CHANS1G(907, 0),    /* Channel 10 */
+-	CHANS1G(907, 500),  /* Channel 11 */
+-	CHANS1G(908, 500),  /* Channel 13 */
+-	CHANS1G(909, 0),    /* Channel 14 */
+-	CHANS1G(909, 500),  /* Channel 15 */
+-	CHANS1G(910, 0),    /* Channel 16 */
+-	CHANS1G(910, 500),  /* Channel 17 */
+-	CHANS1G(911, 0),    /* Channel 18 */
+-	CHANS1G(911, 500),  /* Channel 19 */
+-	CHANS1G(912, 500),  /* Channel 21 */
+-	CHANS1G(913, 0),    /* Channel 22 */
+-	CHANS1G(913, 500),  /* Channel 23 */
+-	CHANS1G(914, 0),    /* Channel 24 */
+-	CHANS1G(914, 500),  /* Channel 25 */
+-	CHANS1G(915, 0),    /* Channel 26 */
+-	CHANS1G(915, 500),  /* Channel 27 */
+-	CHANS1G(916, 500),  /* Channel 29 */
+-	CHANS1G(917, 0),    /* Channel 30 */
+-	CHANS1G(917, 500),  /* Channel 31 */
+-	CHANS1G(918, 0),    /* Channel 32 */
+-	CHANS1G(918, 500),  /* Channel 33 */
+-	CHANS1G(919, 0),    /* Channel 34 */
+-	CHANS1G(919, 500),  /* Channel 35 */
+-	CHANS1G(920, 500),  /* Channel 37 */
+-	CHANS1G(921, 0),    /* Channel 38 */
+-	CHANS1G(921, 500),  /* Channel 39 */
+-	CHANS1G(922, 0),    /* Channel 40 */
+-	CHANS1G(922, 500),  /* Channel 41 */
+-	CHANS1G(923, 0),    /* Channel 42 */
+-	CHANS1G(923, 500),  /* Channel 43 */
+-	CHANS1G(924, 500),  /* Channel 45 */
+-	CHANS1G(925, 0),    /* Channel 46 */
+-	CHANS1G(925, 500),  /* Channel 47 */
+-	CHANS1G(926, 0),    /* Channel 48 */
+-	CHANS1G(926, 500),  /* Channel 49 */
+-	CHANS1G(927, 0),    /* Channel 46 */
+-	CHANS1G(927, 500),  /* Channel 51 */
++
++static const struct ieee80211_sta_s1g_cap nrc_s1g_cap = {
++	.s1g = true,
++	.cap = { S1G_CAP0_SGI_1MHZ | S1G_CAP0_SGI_2MHZ | S1G_CAP0_SGI_4MHZ, // | S1G_CAP0_SGI_8MHZ | S1G_CAP0_SGI_16MHZ,
++		 0,
++		 0,
++		 S1G_CAP3_MAX_MPDU_LEN,
++		 0,
++		 S1G_CAP5_AMPDU,
++		 0,
++		 S1G_CAP7_DUP_1MHZ,
++		 S1G_CAP8_TWT_RESPOND | S1G_CAP8_TWT_REQUEST,
++		 0},
++	.nss_mcs = { 0xfc | 1, /* MCS 7 for 1 SS */
++	/* RX Highest Supported Long GI Data Rate 0:7 */
++		     0,
++	/* RX Highest Supported Long GI Data Rate 0:7 */
++	/* TX S1G MCS Map 0:6 */
++		     0xfa,
++	/* TX S1G MCS Map :7 */
++	/* TX Highest Supported Long GI Data Rate 0:6 */
++		     0x80,
++	/* TX Highest Supported Long GI Data Rate 7:8 */
++	/* Rx Single spatial stream and S1G-MCS Map for 1MHz */
++	/* Tx Single spatial stream and S1G-MCS Map for 1MHz */
++		     0 },
+ };
++
++#define  MAX_NUM_S1G_CHAN 200
++
++static struct ieee80211_channel nrc_channels_s1ghz[MAX_NUM_S1G_CHAN];
+ #else
+ static struct ieee80211_channel nrc_channels_2ghz[] = {
+ 	CHAN2G(2412), /* Channel 1 */
+@@ -189,7 +174,7 @@ static struct ieee80211_channel nrc_channels_5ghz[] = {
+ };
+ #endif /* CONFIG_S1G_CHANNEL */
+ 
+-
++#if !defined(CONFIG_S1G_CHANNEL)
+ static struct ieee80211_rate nrc_rates[] = {
+ 	/* 11b rates */
+ 	{ .bitrate = 10 },
+@@ -209,13 +194,23 @@ static struct ieee80211_rate nrc_rates[] = {
+ 	{ .bitrate = 480 },
+ 	{ .bitrate = 540 }
+ };
++#else
++static struct ieee80211_rate nrc_rates[] = {
++	/* 11ah rates */
++	{ .bitrate = 10 },
++	{ .bitrate = 20, .flags = IEEE80211_RATE_SHORT_PREAMBLE },
++	{ .bitrate = 40, .flags = IEEE80211_RATE_SHORT_PREAMBLE },
++//     { .bitrate = 80, .flags = IEEE80211_RATE_SHORT_PREAMBLE },
++//     { .bitrate = 160, .flags = IEEE80211_RATE_SHORT_PREAMBLE },
++};
++#endif
+ 
+-#if defined(CONFIG_S1G_CHANNEL)
++#ifdef CONFIG_S1G_CHANNEL
+ static const struct ieee80211_regdomain mac80211_regdom = {
+ 	.n_reg_rules = 1,
+ 	.alpha2 =  "99",
+ 	.reg_rules = {
+-		REG_RULE(800, 1000, 4, 0, 20, 0),
++		REG_RULE(700, 1000, 4, 0, 20, 0),
+ 	},
+ };
+ #else
+@@ -855,7 +850,6 @@ static void nrc_mac_roc_finish(struct work_struct *work)
+ {
+ 	struct nrc *nw = container_of(work, struct nrc, roc_finish.work);
+ 
+-	nrc_mac_dbg("%s", __func__);
+ 	ieee80211_remain_on_channel_expired(nw->hw);
+ }
+ 
+@@ -878,7 +872,7 @@ static int nrc_mac_add_interface(struct ieee80211_hw *hw,
+ 	 *	Consideration: There is an WFA test case about WMM-PS but
+ 	 *  it will be related to Wi-Fi P2P
+ 	 */
+-     /* vif->driver_flags |= IEEE80211_VIF_SUPPORTS_UAPSD; */
++	 /* vif->driver_flags |= IEEE80211_VIF_SUPPORTS_UAPSD; */
+ #endif
+ 
+ 	memset(i_vif, 0, sizeof(*i_vif));
+@@ -1025,7 +1019,7 @@ get_wim_channel_width(enum nl80211_chan_width width)
+ 	case NL80211_CHAN_WIDTH_5:
+ 		return CH_WIDTH_5;
+ 	case NL80211_CHAN_WIDTH_10:
+-		return CH_WIDTH_10;
++		return CH_WIDTH_10;      
+ #if defined(CONFIG_S1G_CHANNEL)
+ 	case NL80211_CHAN_WIDTH_1:
+ 		return CH_WIDTH_1;
+@@ -1037,12 +1031,71 @@ get_wim_channel_width(enum nl80211_chan_width width)
+ 		return CH_WIDTH_8;
+ 	case NL80211_CHAN_WIDTH_16:
+ 		return CH_WIDTH_16;
+-#endif /* CONFIG_S1G_CHANNEL */
++	default:
++		return CH_WIDTH_1;
++#else
+ 	default:
+ 		return CH_WIDTH_20;
++#endif /* CONFIG_S1G_CHANNEL */
+ 	}
+ }
+ 
++#ifdef CONFIG_S1G_CHANNEL
++
++// NOTE: support US only for now
++static void init_s1g_channels(struct nrc *nw)
++{
++	struct ieee80211_channel *channels;
++	struct sk_buff *skb;
++	int ch, freq, w;
++
++	// send country to firmware
++	if(fw_country[0] != '!') {
++		nrc_set_s1g_country(fw_country);
++	}
++	skb = nrc_wim_alloc_skb(nw, WIM_CMD_SET, WIM_MAX_SIZE); 
++	nrc_wim_skb_add_tlv(skb, WIM_TLV_COUNTRY_CODE, sizeof(u16), (char*)nrc_get_s1g_country());
++	nrc_xmit_wim_request(nw, skb);
++
++	channels = nrc_channels_s1ghz;
++
++	for (ch = 0; ch < nrc_num_channels(nrc_get_s1g_country()); ch++) {
++		
++		freq = nrc_get_s1g_freq(nrc_get_s1g_country(), ch);
++		channels[ch].band = NL80211_BAND_S1GHZ;
++		channels[ch].center_freq = freq / 10;
++		channels[ch].freq_offset = freq % 10 * 100;
++
++		w = nrc_s1g_width(nrc_get_s1g_country(), freq);
++
++		switch(w) 
++		{
++			default:
++			case 1:
++				channels[ch].flags = IEEE80211_CHAN_1MHZ;
++				break;
++			case 2:
++				channels[ch].flags = IEEE80211_CHAN_2MHZ;
++				break;
++			case 4:
++				channels[ch].flags = IEEE80211_CHAN_4MHZ;
++				break;             
++		}
++
++		channels[ch].hw_value =  ch + 1;
++
++		nrc_mac_dbg("%s: channels[%d].band %d channels[%d].center_freq %d channels[%d].freq_offset %d channels[%d].flags 0x%X channels[%d].hw_value %d freq %d\n", 
++		__func__,
++		ch, channels[ch].band,
++		ch, channels[ch].center_freq,
++		ch, channels[ch].freq_offset,
++		ch, channels[ch].flags, 
++		ch, channels[ch].hw_value,
++		freq);
++	}
++}
++#endif
++
+ #ifdef CONFIG_SUPPORT_CHANNEL_INFO
+ static void nrc_mac_add_tlv_channel(struct sk_buff *skb,
+ 					struct cfg80211_chan_def *chandef)
+@@ -1060,20 +1113,45 @@ static void nrc_mac_add_tlv_channel(struct sk_buff *skb,
+ 	ch_param.channel = chandef->chan->center_freq;
+ 	ch_param.type = ch_type;
+ 	ch_param.width = get_wim_channel_width(chandef->width);
++
++	nrc_mac_dbg("%s: ch_param.channel(%d), ch_param.type(%d), ch_param.width(%d)\n", __func__, ch_param.channel,
++			ch_param.type, ch_param.width);
++
+ 	nrc_wim_skb_add_tlv(skb, WIM_TLV_CHANNEL,
+ 				   sizeof(ch_param), &ch_param);
+ #else
+ 	struct wim_s1g_channel_param param;
+ 
++	nrc_mac_dbg("%s: chandef->width %d\n", __func__, chandef->width);
++
+ 	param.pr_freq = FREQ_TO_100KHZ(chandef->chan->center_freq,
+-				chandef->chan->center_freq_fractional);
++				chandef->chan->freq_offset);
+ 	param.op_freq = FREQ_TO_100KHZ(chandef->center_freq1,
+-				chandef->center_freq1_fractional);
++				chandef->freq1_offset);
++
++	nrc_s1g_set_channel_bw(chandef);
++
+ 	param.width = get_wim_channel_width(chandef->width);
+-	pr_err("nrc: pri(%d), op(%d), width(%d)\n", param.pr_freq,
+-			param.op_freq, param.width);
+-	nrc_wim_skb_add_tlv(skb, WIM_TLV_S1G_CHANNEL, sizeof(param),
+-			&param);
++
++	nrc_mac_dbg("%s: param.pr_freq(%d), param.op_freq(%d), ch_param.width(%d)\n", __func__, param.pr_freq,
++			param.op_freq, param.width);    
++
++	param.flags = 0;
++
++	// fix for broken 4 MHZ S1G issue
++	if(param.width == CH_WIDTH_4) {
++		struct wim_channel_param ch_param;
++
++		ch_param.channel = nrc_freq_s1g_fw(nrc_get_s1g_country(), FREQ_TO_100KHZ(chandef->chan->center_freq,
++				chandef->chan->freq_offset));
++		ch_param.type = NL80211_CHAN_WIDTH_80;
++		ch_param.width = CH_WIDTH_80;
++
++	    nrc_wim_skb_add_tlv(skb, WIM_TLV_CHANNEL, sizeof(ch_param), &ch_param);
++	}
++	else {
++		nrc_wim_skb_add_tlv(skb, WIM_TLV_S1G_CHANNEL, sizeof(param), &param);
++	}
+ #endif
+ }
+ #else
+@@ -1109,14 +1187,10 @@ static int nrc_mac_config(struct ieee80211_hw *hw, u32 changed)
+ #ifdef CONFIG_SUPPORT_CHANNEL_INFO
+ 		nw->band = hw->conf.chandef.chan->band;
+ 		nw->center_freq = hw->conf.chandef.chan->center_freq;
++		nrc_mac_add_tlv_channel(skb, &hw->conf.chandef);
+ #else
+ 		nw->band = hw->conf.channel->band;
+ 		nw->center_freq = hw->conf.channel->center_freq;
+-#endif
+-
+-#ifdef CONFIG_SUPPORT_CHANNEL_INFO
+-		nrc_mac_add_tlv_channel(skb, &hw->conf.chandef);
+-#else
+ 		nrc_mac_add_tlv_channel(skb, &hw->conf);
+ #endif
+ 		/* TODO: band (2G, 5G, etc) and bandwidth (20MHz, 40MHz, etc) */
+@@ -1229,7 +1303,7 @@ static void nrc_mac_bss_info_changed(struct ieee80211_hw *hw,
+ 		nrc_wim_skb_add_tlv(skb, WIM_TLV_BASIC_RATE,
+ 				sizeof(info->basic_rates), &info->basic_rates);
+ 	}
+-
++#ifndef CONFIG_S1G_CHANNEL
+ 	if (changed & BSS_CHANGED_HT) {
+ 		nrc_mac_dbg("ht: %08x", info->ht_operation_mode);
+ 
+@@ -1237,7 +1311,7 @@ static void nrc_mac_bss_info_changed(struct ieee80211_hw *hw,
+ 				    sizeof(info->ht_operation_mode),
+ 				    &info->ht_operation_mode);
+ 	}
+-
++#endif
+ 	if (changed & BSS_CHANGED_BSSID) {
+ 		nrc_mac_dbg("bssid=%pM", info->bssid);
+ 
+@@ -1466,8 +1540,9 @@ int nrc_mac_sta_state(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 		i_sta->vif = vif;
+ 		nrc_mac_sta_add(hw, vif, sta);
+ 
+-	} else if (state_changed(ASSOC, AUTH))
++	} else if (state_changed(ASSOC, AUTH)) {
+ 		nrc_mac_sta_remove(hw, vif, sta);
++	}
+ 
+ 	nrc_wim_change_sta_state(hw->priv, vif, sta, new_state);
+ 
+@@ -1579,8 +1654,6 @@ static int nrc_mac_get_survey(struct ieee80211_hw *hw, int idx,
+ {
+ 	struct ieee80211_conf *conf = &hw->conf;
+ 
+-	nrc_mac_dbg("%s (idx=%d)", __func__, idx);
+-
+ 	if (idx != 0)
+ 		return -ENOENT;
+ 
+@@ -1599,7 +1672,7 @@ static int nrc_mac_get_survey(struct ieee80211_hw *hw, int idx,
+ 	 * report any noise, especially not a magically conjured one :-)
+ 	 */
+ 	survey->filled = SURVEY_INFO_NOISE_DBM;
+-	survey->noise = -92;
++	survey->noise = -92;  
+ 
+ 	return 0;
+ }
+@@ -1724,6 +1797,7 @@ void nrc_mac_cancel_hw_scan(struct ieee80211_hw *hw,
+ 	nrc_cancel_hw_scan(hw, vif);
+ }
+ 
++#ifdef NRC_BUILD_USE_HWSCAN
+ static int
+ __nrc_mac_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 		  struct cfg80211_scan_request *req,
+@@ -1774,6 +1848,7 @@ nrc_mac_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ 	return __nrc_mac_hw_scan(hw, vif, req, NULL);
+ }
+ #endif
++#endif /* NRC_BUILD_USE_HWSCAN */
+ 
+ #ifdef CONFIG_USE_SCAN_TIMEOUT
+ static void nrc_mac_scan_timeout(struct work_struct *work)
+@@ -1810,7 +1885,7 @@ nrc_mac_set_bitrate_mask(struct ieee80211_hw *hw,
+ 			mask->control[1].legacy,
+ 			mask->control[0].ht_mcs[0],
+ 			mask->control[1].ht_mcs[0]);
+-
++#ifndef CONFIG_S1G_CHANNEL
+ 	if (mask->control[band].ht_mcs[0] == 0xFF)
+ 		band = NL80211_BAND_5GHZ;
+ 	mcs_mask = mask->control[band].ht_mcs[0] & 0xFF;
+@@ -1828,6 +1903,12 @@ nrc_mac_set_bitrate_mask(struct ieee80211_hw *hw,
+ 			mcs_mask = mcs_mask>>1;
+ 		}
+ 	}
++#else
++	band = NL80211_BAND_S1GHZ;
++	mcs_level = 10;
++	mcs_mask = 0xFF;
++	i = 0;  // mask compiler warning
++#endif
+ 	skb = nrc_wim_alloc_skb_vif(nw, vif, WIM_CMD_SET, WIM_MAX_SIZE);
+ 	nrc_wim_skb_add_tlv(skb, WIM_TLV_MCS, sizeof(mcs_level), &mcs_level);
+ 	ret = nrc_xmit_wim_request(nw, skb);
+@@ -1842,8 +1923,6 @@ static void nrc_mac_sw_scan(struct ieee80211_hw *hw,
+ {
+ 	struct nrc *nw = hw->priv;
+ 
+-	nrc_mac_dbg("%s", __func__);
+-
+ 	mutex_lock(&nw->state_mtx);
+ 
+ 	if (nw->scan_mode == NRC_SCAN_MODE_IDLE) {
+@@ -1861,8 +1940,6 @@ static void nrc_mac_sw_scan_complete(struct ieee80211_hw *hw,
+ {
+ 	struct nrc *nw = hw->priv;
+ 
+-	nrc_mac_dbg("%s", __func__);
+-
+ 	mutex_lock(&nw->state_mtx);
+ 
+ 	if (nw->scan_mode == NRC_SCAN_MODE_SCANNING) {
+@@ -1874,7 +1951,7 @@ static void nrc_mac_sw_scan_complete(struct ieee80211_hw *hw,
+  out:
+ 	mutex_unlock(&nw->state_mtx);
+ }
+-#endif
++#endif /* NRC_BUILD_USE_HWSCAN */
+ 
+ #ifdef CONFIG_SUPPORT_NEW_FLUSH
+ static void nrc_mac_flush(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+@@ -2128,7 +2205,11 @@ static int nrc_mac_roc(struct ieee80211_hw *hw, struct ieee80211_channel *chan,
+ #ifdef CONFIG_SUPPORT_CHANNEL_INFO
+ 	if (!hw->conf.chandef.chan) {
+ 		chandef.chan = chan;
++#ifndef  CONFIG_S1G_CHANNEL       
+ 		chandef.width = NL80211_CHAN_WIDTH_20;
++#else     
++		chandef.width = NL80211_CHAN_WIDTH_1;
++#endif
+ 		cdef = &chandef;
+ 	} else
+ 		cdef = &hw->conf.chandef;
+@@ -2172,7 +2253,6 @@ static int nrc_mac_cancel_roc(struct ieee80211_hw *hw)
+ {
+ 	struct nrc *nw = hw->priv;
+ 
+-	nrc_mac_dbg("%s", __func__);
+ 	cancel_delayed_work_sync(&nw->roc_finish);
+ 
+ 	return 0;
+@@ -2276,12 +2356,41 @@ static int nrc_mac_switch_vif_chanctx(struct ieee80211_hw *hw,
+ 	skb = nrc_wim_alloc_skb_vif(nw, vif, WIM_CMD_SET, WIM_MAX_SIZE);
+ 	if (!skb)
+ 		return -EINVAL;
+-
++#if !defined(CONFIG_S1G_CHANNEL)
+ 	nrc_wim_skb_add_tlv(skb,
+ 			WIM_TLV_CHANNEL,
+ 			sizeof(new_ctx->def.chan->center_freq),
+ 			&new_ctx->def.chan->center_freq);
++#else
++	struct wim_s1g_channel_param param;
++
++	param.pr_freq = FREQ_TO_100KHZ(new_ctx->def.chan->center_freq,
++				new_ctx->def.chan->freq_offset);
++	param.op_freq = FREQ_TO_100KHZ(new_ctx->def.chan->center_freq1,
++				new_ctx->def.chan->freq1_offset);
++
++	nrc_s1g_set_channel_bw(new_ctx->def);
+ 
++	param.width = get_wim_channel_width(new_ctx->def.chan->width);
++
++	param.flags = 0;
++
++	nrc_mac_dbg("%s: pr_freq(%d), op_freq(%d), width(%d)\n", __func__, param.pr_freq,
++			param.op_freq, param.width);
++
++	// fix for broken set 4 MHZ S1G firmware issue
++	if(param.width == CH_WIDTH_4) {
++		struct wim_channel_param ch_param;
++		ch_param.channel = nrc_freq_s1g_fw(nw->alpha2, 
++						FREQ_TO_100KHZ(new_ctx->def.chan->center_freq, new_ctx->def.chan->freq_offset));
++		ch_param.type = NL80211_CHAN_WIDTH_80;
++		ch_param.width = CH_WIDTH_80;
++		nrc_wim_skb_add_tlv(skb, WIM_TLV_CHANNEL, sizeof(ch_param), &ch_param);
++	}
++	else {
++		nrc_wim_skb_add_tlv(skb, WIM_TLV_S1G_CHANNEL, sizeof(param), &param);
++	}
++#endif
+ 	nrc_xmit_wim_request(nw, skb);
+ 
+ #ifdef CONFIG_SUPPORT_ITERATE_INTERFACE
+@@ -2415,6 +2524,12 @@ static int nrc_reg_notifier(struct wiphy *wiphy,
+ 
+ #if defined(CONFIG_SUPPORT_BD)
+ 	//Read board data and save buffer
++#if defined(CONFIG_S1G_CHANNEL)
++	if (nrc_is_eu(request->alpha2)) {
++		bd_param = nrc_read_bd_tx_pwr("EU");
++	}
++	else
++#endif /* CONFIG_S1G_CHANNEL */	
+ 	bd_param = nrc_read_bd_tx_pwr(request->alpha2);
+ 	if(bd_param) {
+ 		nrc_dbg(NRC_DBG_STATE,"type %04X length %04X checksum %04X",
+@@ -2434,15 +2549,22 @@ static int nrc_reg_notifier(struct wiphy *wiphy,
+ 		}
+ 	}
+ #endif /* defined(CONFIG_SUPPORT_BD) */
+-
+ 	if (request->alpha2[0] != nw->alpha2[0] ||
+-			request->alpha2[1] != nw->alpha2[1]) {
++		request->alpha2[1] != nw->alpha2[1]) {
+ 		nw->alpha2[0] = request->alpha2[0];
+ 		nw->alpha2[1] = request->alpha2[1];
+ 
+ 		skb = nrc_wim_alloc_skb(nw, WIM_CMD_SET, WIM_MAX_SIZE);
+-		nrc_wim_skb_add_tlv(skb, WIM_TLV_COUNTRY_CODE,
+-				sizeof(u16), request->alpha2);
++
++#if defined(CONFIG_S1G_CHANNEL)
++		nrc_set_s1g_country(request->alpha2);
++
++		if (nrc_is_eu(request->alpha2)) {
++			nrc_wim_skb_add_tlv(skb, WIM_TLV_COUNTRY_CODE, sizeof(u16), "EU");
++		}
++		else
++#endif /* CONFIG_S1G_CHANNEL */
++		nrc_wim_skb_add_tlv(skb, WIM_TLV_COUNTRY_CODE, sizeof(u16), request->alpha2);
+ 
+ #if defined(CONFIG_SUPPORT_BD)
+  		if(bd_param) {
+@@ -2611,7 +2733,6 @@ static const struct nl80211_vendor_cmd_info nrc_vendor_events[] = {
+ 	},
+ };
+ 
+-
+ /**
+  * nrc_hw_register - initialize struct ieee80211_hw instance
+  */
+@@ -2650,12 +2771,10 @@ int nrc_register_hw(struct nrc *nw)
+ #ifdef CONFIG_MAC80211_MESH
+ 		BIT(NL80211_IFTYPE_MESH_POINT) |
+ #endif
+-#if !defined(CONFIG_S1G_CHANNEL)
+ #ifdef CONFIG_SUPPORT_P2P
+ 		BIT(NL80211_IFTYPE_P2P_CLIENT) | BIT(NL80211_IFTYPE_P2P_GO) |
+ 		BIT(NL80211_IFTYPE_P2P_DEVICE) |
+ #endif
+-#endif /* CONFIG_S1G_CHANNEL */
+ #if defined(CONFIG_WIRELESS_WDS)
+ 		BIT(NL80211_IFTYPE_WDS) |
+ #endif
+@@ -2728,6 +2847,10 @@ int nrc_register_hw(struct nrc *nw)
+ 		| NL80211_PROBE_RESP_OFFLOAD_SUPPORT_P2P;
+ #endif
+ 
++#ifdef CONFIG_S1G_CHANNEL
++	hw->wiphy->flags |= NL80211_EXT_FEATURE_SCAN_FREQ_KHZ;
++#endif
++
+ #ifdef CONFIG_USE_NEW_BAND_ENUM
+ 	for (band = NL80211_BAND_2GHZ; band < NUM_NL80211_BANDS; band++) {
+ #else
+@@ -2738,14 +2861,15 @@ int nrc_register_hw(struct nrc *nw)
+ 		switch (band) {
+ #if defined(CONFIG_S1G_CHANNEL)
+ 		case NL80211_BAND_S1GHZ:
++			memcpy(&sband->s1g_cap, &nrc_s1g_cap, sizeof(sband->s1g_cap));
++			init_s1g_channels(nw);
+ 			sband->channels = nrc_channels_s1ghz;
+-			sband->n_channels = ARRAY_SIZE(nrc_channels_s1ghz);
++			sband->n_channels = nrc_num_channels(nrc_get_s1g_country());
+ 			sband->bitrates = nrc_rates;
+ 			sband->n_bitrates = ARRAY_SIZE(nrc_rates);
+-
+-			sband->s1g_cap.s1g_supported = true;
++			sband->band = NL80211_BAND_S1GHZ;
++			sband->ht_cap.ht_supported = true;
+ 			hw->wiphy->bands[band] = sband;
+-			continue;
+ 			break;
+ #else
+ 		case NL80211_BAND_2GHZ:
+@@ -2814,14 +2938,15 @@ int nrc_register_hw(struct nrc *nw)
+ 	hw->wiphy->vendor_events = nrc_vendor_events;
+ 	hw->wiphy->n_vendor_events = ARRAY_SIZE(nrc_vendor_events);
+ 
++	// NOTE: use wireless-regdb with 802.11ah freqs
+ #ifdef CONFIG_SUPPORT_AFTER_KERNEL_3_0_36
+-	hw->wiphy->regulatory_flags =
++	hw->wiphy->regulatory_flags |=
+ 		REGULATORY_CUSTOM_REG|WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL;
+-#endif
+ 
+ 	wiphy_apply_custom_regulatory(hw->wiphy, &mac80211_regdom);
+ 	nw->alpha2[0] = '9';
+-	nw->alpha2[1] = '9';
++	nw->alpha2[1] = '9'; 
++#endif
+ 
+ 	if (nrc_mac_is_s1g(nw)) {
+ 		/*this is only for 802.11ah*/
+@@ -2882,5 +3007,9 @@ void nrc_unregister_hw(struct nrc *nw)
+ 
+ bool nrc_mac_is_s1g(struct nrc *nw)
+ {
++#ifdef CONFIG_S1G_CHANNEL
++	return 1;
++#else
+ 	return (nw->fwinfo.version != WIM_SYSTEM_VER_11N);
++#endif
+ }
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-netlink.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-netlink.c
+index 18b2e9a..a897adf 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-netlink.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-netlink.c
+@@ -496,6 +496,7 @@ static int halow_set_dut(struct sk_buff *skb, struct genl_info *info)
+ 	return halow_reply(NL_HALOW_SET_DUT, info, NL_HALOW_RESP_OK);
+ 
+ halow_not_supported:
++	nrc_dbg(NRC_DBG_CAPI, "%s: halow_not_supported", __func__);
+ 	return halow_reply(NL_HALOW_SET_DUT, info, NL_HALOW_RESP_NOT_SUPP);
+ }
+ 
+@@ -1516,7 +1517,7 @@ int nrc_netlink_init(struct nrc *nw)
+ #endif
+ 
+ 	if (rc) {
+-		pr_err("genl_register_family_with_ops_groups() is failed (%d).",
++		pr_err("genl_register_family_with_ops_groups() failed (%d).",
+ 				rc);
+ 		return -EINVAL;
+ 	}
+@@ -1524,7 +1525,7 @@ int nrc_netlink_init(struct nrc *nw)
+ 	rc = netlink_register_notifier(&nl_umac_netlink_notifier);
+ 
+ 	if (rc) {
+-		pr_err("netlink_register_notifier() is failed (%d).",
++		pr_err("netlink_register_notifier() failed (%d).",
+ 				rc);
+ 		genl_unregister_family(&nrc_nl_fam);
+ 		return -EINVAL;
+@@ -1536,7 +1537,6 @@ int nrc_netlink_init(struct nrc *nw)
+ 
+ void nrc_netlink_exit(void)
+ {
+-	pr_err("%s", __func__);
+ 	netlink_unregister_notifier(&nl_umac_netlink_notifier);
+ 	genl_unregister_family(&nrc_nl_fam);
+ }
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.c
+new file mode 100644
+index 0000000..4ac2756
+--- /dev/null
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.c
+@@ -0,0 +1,415 @@
++/*
++ * Copyright (c) 2021 James Ewing jim@droidifi.com
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#include "nrc-s1g.h"
++#include "nrc-debug.h"
++
++#ifdef CONFIG_S1G_CHANNEL
++
++#define EUMAP(_alpha2) { \
++	.alpha2 = _alpha2,   \
++}
++
++struct nrc_eu_map {
++	char alpha2[3];
++};
++
++const struct nrc_eu_map eu_map[] = {
++	EUMAP("AD"),
++	EUMAP("AF"),
++	EUMAP("AI"),
++	EUMAP("AL"),
++	EUMAP("AM"),
++	EUMAP("AN"),
++	EUMAP("AT"),
++	EUMAP("BA"),
++	EUMAP("BE"),
++	EUMAP("BG"),
++	EUMAP("CH"),
++	EUMAP("CY"),
++	EUMAP("CZ"),
++	EUMAP("DE"),
++	EUMAP("DK"),
++	EUMAP("EE"),
++	EUMAP("ES"),
++	EUMAP("FI"),
++	EUMAP("FR"),
++	EUMAP("GB"),
++	EUMAP("GE"),
++	EUMAP("GR"),
++	EUMAP("HR"),
++	EUMAP("HU"),
++	EUMAP("IE"),
++	EUMAP("IT"),
++	EUMAP("LI"),
++	EUMAP("LT"),
++	EUMAP("LU"),
++	EUMAP("LV"),
++	EUMAP("MC"),
++	EUMAP("MK"),
++	EUMAP("MT"),
++	EUMAP("NL"),
++	EUMAP("NO"),
++	EUMAP("PL"),
++	EUMAP("PT"),
++	EUMAP("RO"),
++	EUMAP("RS"),
++	EUMAP("SE"),
++	EUMAP("SI"),
++	EUMAP("SK"),
++};
++
++#define NUM_EU_COUNTRIES ARRAY_SIZE(eu_map)
++
++static char s1g_alpha2[3] = "US";
++
++#define S1GMAP(_alpha2, _freq_s1g, _freq_fw, _ch, _bw) { \
++	.alpha2 = _alpha2,   \
++	.s1g_freq = (_freq_s1g),\
++	.fw_freq = (_freq_fw),   \
++	.channel = (_ch),       \
++	.width = (_bw) \
++}
++
++const struct nrc_s1g_map s1g_map[] = {
++	S1GMAP("US", 9025, 2412, 1, 1),
++	S1GMAP("US", 9035, 2422, 3, 1),
++	S1GMAP("US", 9045, 2432, 5, 1),
++	S1GMAP("US", 9055, 2442, 7, 1),
++	S1GMAP("US", 9065, 2452, 9, 1),
++	S1GMAP("US", 9075, 2462, 11, 1),
++	S1GMAP("US", 9085, 5180, 36, 1),
++	S1GMAP("US", 9095, 5185, 37, 1),
++	S1GMAP("US", 9105, 5190, 38, 1),
++	S1GMAP("US", 9115, 5195, 39, 1),
++	S1GMAP("US", 9125, 5200, 40, 1),
++	S1GMAP("US", 9135, 5205, 41, 1),
++	S1GMAP("US", 9145, 5210, 42, 1),
++	S1GMAP("US", 9155, 5215, 43, 1),
++	S1GMAP("US", 9165, 5220, 44, 1),
++	S1GMAP("US", 9175, 5225, 45, 1),
++	S1GMAP("US", 9185, 5230, 46, 1),
++	S1GMAP("US", 9195, 5235, 47, 1),
++	S1GMAP("US", 9205, 5240, 48, 1),
++	S1GMAP("US", 9215, 5745, 149, 1),
++	S1GMAP("US", 9225, 5750, 150, 1),
++	S1GMAP("US", 9235, 5755, 151, 1),
++	S1GMAP("US", 9245, 5760, 152, 1),
++	S1GMAP("US", 9255, 5500, 100, 1),
++	S1GMAP("US", 9265, 5520, 104, 1),
++	S1GMAP("US", 9275, 5540, 108, 1),
++	S1GMAP("US", 9030, 2417, 2, 2),
++	S1GMAP("US", 9040, 2427, 4, 2),    
++	S1GMAP("US", 9050, 2437, 6, 2),
++	S1GMAP("US", 9070, 2457, 10, 2),
++	S1GMAP("US", 9090, 5765, 153, 2),
++	S1GMAP("US", 9110, 5770, 154, 2),
++	S1GMAP("US", 9130, 5775, 155, 2),
++	S1GMAP("US", 9150, 5780, 156, 2),
++	S1GMAP("US", 9170, 5785, 157, 2),
++	S1GMAP("US", 9190, 5790, 158, 2),
++	S1GMAP("US", 9210, 5795, 159, 2),
++	S1GMAP("US", 9230, 5800, 160, 2),
++	S1GMAP("US", 9250, 5805, 161, 2),
++	S1GMAP("US", 9270, 5560, 112, 2),
++	S1GMAP("US", 9060, 2447, 8, 4),
++	S1GMAP("US", 9100, 5810, 162, 4),
++	S1GMAP("US", 9140, 5815, 163, 4),
++	S1GMAP("US", 9180, 5820, 164, 4),
++	S1GMAP("US", 9220, 5825, 165, 4),
++	S1GMAP("US", 9260, 5580, 116, 4),
++	S1GMAP("KR", 9180, 5180, 36, 1), 
++	S1GMAP("KR", 9190, 5185, 37, 1),
++	S1GMAP("KR", 9200, 5190, 38, 1),
++	S1GMAP("KR", 9210, 5195, 39, 1),
++	S1GMAP("KR", 9220, 5200, 40, 1),
++	S1GMAP("KR", 9230, 5205, 41, 1),
++	S1GMAP("KR", 9428, 5230, 46, 1),
++	S1GMAP("KR", 9438, 5235, 47, 1),
++	S1GMAP("KR", 9448, 5240, 48, 1),
++	S1GMAP("KR", 9458, 5745, 149, 1),
++	S1GMAP("KR", 9185, 5210, 42, 2),
++	S1GMAP("KR", 9205, 5215, 43, 2),
++	S1GMAP("KR", 9225, 5220, 44, 2),
++	S1GMAP("KR", 9433, 5750, 150, 2),
++	S1GMAP("KR", 9453, 5755, 151, 2),
++	S1GMAP("KR", 9215, 5225, 45, 4),
++	S1GMAP("KR", 9443, 5760, 152, 4),
++	S1GMAP("K!", 9255, 5180, 36, 1),
++	S1GMAP("K!", 9265, 5185, 37, 1),
++	S1GMAP("K!", 9275, 5190, 38, 1),
++	S1GMAP("K!", 9285, 5195, 39, 1),
++	S1GMAP("K!", 9295, 5200, 40, 1),
++	S1GMAP("K!", 9305, 5205, 41, 1),
++	S1GMAP("K!", 9270, 5210, 42, 2),
++	S1GMAP("K!", 9290, 5215, 43, 2),
++	S1GMAP("JP", 9170, 5180, 36, 1),
++	S1GMAP("JP", 9180, 5185, 37, 1),
++	S1GMAP("JP", 9190, 5190, 38, 1),
++	S1GMAP("JP", 9200, 5195, 39, 1),
++	S1GMAP("JP", 9210, 5200, 40, 1),
++	S1GMAP("JP", 9220, 5205, 41, 1),
++	S1GMAP("JP", 9230, 5210, 42, 1),
++	S1GMAP("JP", 9240, 5215, 43, 1),
++	S1GMAP("JP", 9250, 5220, 44, 1),
++	S1GMAP("JP", 9260, 5725, 45, 1),
++	S1GMAP("JP", 9270, 5230, 46, 2),
++	S1GMAP("TW", 8390, 5180, 36, 1),
++	S1GMAP("TW", 8400, 5185, 37, 1),
++	S1GMAP("TW", 8410, 5190, 38, 1),
++	S1GMAP("TW", 8420, 5195, 39, 1),
++	S1GMAP("TW", 8430, 5200, 40, 1),
++	S1GMAP("TW", 8440, 5205, 41, 1),
++	S1GMAP("TW", 8450, 5210, 42, 1),
++	S1GMAP("TW", 8460, 5215, 43, 1),
++	S1GMAP("TW", 8470, 5220, 44, 1),
++	S1GMAP("TW", 8480, 5225, 45, 1),
++	S1GMAP("TW", 8490, 5230, 46, 1),
++	S1GMAP("TW", 8500, 5235, 47, 1),
++	S1GMAP("TW", 8510, 5240, 48, 1),
++	S1GMAP("TW", 8395, 5745, 149, 2),
++	S1GMAP("TW", 8415, 5750, 150, 2),
++	S1GMAP("TW", 8435, 5755, 151, 2),
++	S1GMAP("TW", 8455, 5760, 152, 2),
++	S1GMAP("TW", 8475, 5765, 153, 2),
++	S1GMAP("TW", 8495, 5770, 154, 2),
++	S1GMAP("TW", 8405, 5775, 155, 4),
++	S1GMAP("TW", 8445, 5780, 156, 4),
++	S1GMAP("TW", 8485, 5785, 157, 4),
++	S1GMAP("EU", 8635, 5180, 36, 1),
++	S1GMAP("EU", 8645, 5185, 37, 1),
++	S1GMAP("EU", 8655, 5190, 38, 1),
++	S1GMAP("EU", 8665, 5195, 39, 1),
++	S1GMAP("EU", 8675, 5200, 40, 1),
++	S1GMAP("EU", 8640, 5205, 41, 2),
++	S1GMAP("EU", 8660, 5210, 42, 2),
++	S1GMAP("CN", 7550, 5180, 36, 1),
++	S1GMAP("CN", 7565, 5185, 37, 1),
++	S1GMAP("CN", 7570, 5190, 38, 1),
++	S1GMAP("CN", 7585, 5195, 39, 1),
++	S1GMAP("CN", 7595, 5200, 40, 1),
++	S1GMAP("CN", 7605, 5205, 41, 1),
++	S1GMAP("CN", 7615, 5210, 42, 1),
++	S1GMAP("CN", 7625, 5215, 43, 1),
++	S1GMAP("CN", 7635, 5220, 44, 1),
++	S1GMAP("CN", 7645, 5225, 45, 1),
++	S1GMAP("CN", 7655, 5230, 46, 1),
++	S1GMAP("CN", 7665, 5235, 47, 1),
++	S1GMAP("CN", 7675, 5240, 48, 1),
++	S1GMAP("CN", 7685, 5745, 149, 1),
++	S1GMAP("CN", 7695, 5750, 150, 1),
++	S1GMAP("CN", 7705, 5755, 151, 1),
++	S1GMAP("CN", 7795, 5760, 152, 1),
++	S1GMAP("CN", 7805, 5765, 153, 1),
++	S1GMAP("CN", 7815, 5770, 154, 1),
++	S1GMAP("CN", 7825, 5775, 155, 1),
++	S1GMAP("CN", 7835, 5780, 156, 1),
++	S1GMAP("CN", 7845, 5785, 156, 1),
++	S1GMAP("CN", 7855, 5790, 156, 1),
++	S1GMAP("CN", 7865, 5795, 156, 1),
++	S1GMAP("CN", 7800, 5800, 156, 2),
++	S1GMAP("CN", 7820, 5805, 156, 2),
++	S1GMAP("CN", 7840, 5810, 156, 2),
++	S1GMAP("CN", 7860, 5815, 156, 2),
++	S1GMAP("CN", 7810, 5820, 156, 4),
++	S1GMAP("CN", 7850, 5825, 156, 4),
++	S1GMAP("", 0, 0, 0, 0),
++};
++
++#define NUM_S1G_CHANNELS ARRAY_SIZE(s1g_map)
++#define S1G_GUARD(p) (p && (p - s1g_map) < NUM_S1G_CHANNELS)
++#define S1G_NF &s1g_map[NUM_S1G_CHANNELS - 1]
++
++static const struct nrc_s1g_map* find_entry(const char* alpha2, int freq)
++{
++	const struct nrc_s1g_map *p = s1g_map;
++	const char* country;
++
++	nrc_dbg(NRC_DBG_S1G, "%s %s %d\n", __func__, alpha2, freq);
++
++	if(nrc_is_eu(alpha2))
++		country = "EU";
++	else
++		country = alpha2;
++
++	while(S1G_GUARD(p) && memcmp(p->alpha2, country, 2))
++		p++;
++
++	if(!S1G_GUARD(p)) {
++		nrc_dbg(NRC_DBG_S1G, "%s Overran array\n", __func__);
++		return S1G_NF;
++	}
++
++	if(freq > 7500) {
++		while(S1G_GUARD(p) && p->s1g_freq != freq)
++			p++;
++	}
++	else if (freq > 0) {
++		while(S1G_GUARD(p) && p->fw_freq != freq)
++			p++;
++	}
++
++	if(!S1G_GUARD(p)) {
++		nrc_dbg(NRC_DBG_S1G, "%s Overran array\n", __func__);
++		return S1G_NF;
++	}
++
++	nrc_dbg(NRC_DBG_S1G, "%s %s p->s1g_freq %d p->fw_freq %d\n", __func__, country, p->s1g_freq, p->fw_freq);
++
++	return p;
++}
++
++int nrc_get_s1g_freq(const char* alpha2, int ch)
++{
++	const struct nrc_s1g_map *p;
++
++	nrc_dbg(NRC_DBG_S1G, "%s\n", __func__);
++
++	p = find_entry(alpha2, 0);
++
++	while(S1G_GUARD(p) && ch--)
++		p++;
++
++	nrc_dbg(NRC_DBG_S1G, "%s p->alpha2 %s p->s1g_freq %d p->fw_freq %d\n", __func__, p->alpha2, p->s1g_freq, p->fw_freq);
++
++	return p->s1g_freq;
++}
++
++int nrc_freq_fw_s1g(const char* alpha2, int fw_freq)
++{
++	nrc_dbg(NRC_DBG_S1G, "%s\n", __func__);
++
++	return find_entry(alpha2, fw_freq)->s1g_freq;
++}
++
++int nrc_freq_s1g_fw(const char* alpha2, int s1g_freq)
++{
++	nrc_dbg(NRC_DBG_S1G, "%s\n", __func__);
++
++	return find_entry(alpha2, s1g_freq)->fw_freq;
++}
++
++int nrc_s1g_width(const char* alpha2, int s1g_freq)
++{
++	nrc_dbg(NRC_DBG_S1G, "%s\n", __func__);
++
++	return find_entry(alpha2, s1g_freq)->width;
++}
++ 
++int nrc_num_channels(const char* alpha2)
++{
++	const struct nrc_s1g_map *p1, *p2;
++	const char* country;
++
++	nrc_dbg(NRC_DBG_S1G, "%s\n", __func__);
++
++	if(nrc_is_eu(alpha2))
++		country = "EU";
++	else
++		country = alpha2;
++
++	p1 = p2 = find_entry(country, 0);
++
++	do{
++		p2++;
++	} while(S1G_GUARD(p2) && p2->alpha2[0] == country[0] && p2->alpha2[1] == country[1]);
++
++	nrc_dbg(NRC_DBG_S1G, "%s num_channels %d\n", __func__, (int)(p2 - p1));
++
++	return (int)(p2 - p1);
++}
++
++void nrc_remap_status(const char* alpha2, struct ieee80211_rx_status *status)
++{
++	int s1g_freq;
++	const char* country;
++
++	if(nrc_is_eu(alpha2))
++		country = "EU";
++	else
++		country = alpha2;
++
++	nrc_dbg(NRC_DBG_S1G, "%s status->freq %d status->freq_offset %d\n", __func__, status->freq, status->freq_offset);
++
++	status->freq_offset = 0;
++	s1g_freq = nrc_freq_fw_s1g(country, status->freq);
++
++	nrc_dbg(NRC_DBG_S1G, "%s s1g_freq %d\n", __func__, s1g_freq);
++
++	status->freq = s1g_freq / 10;
++	status->freq_offset = (s1g_freq % 10 ? 1 : 0);
++
++	nrc_dbg(NRC_DBG_S1G, "%s status->freq %d status->freq_offset %d\n", __func__, status->freq, status->freq_offset);
++}
++
++void nrc_set_s1g_country(const char* alpha2)
++{
++	if (nrc_is_eu(alpha2)) {
++		s1g_alpha2[0] = 'E';
++		s1g_alpha2[1] = 'U';
++		s1g_alpha2[2] = '\0';
++	}
++	else {
++		s1g_alpha2[0] = alpha2[0];
++		s1g_alpha2[1] = alpha2[1];
++		s1g_alpha2[2] = '\0';
++	};
++}
++
++const char* nrc_get_s1g_country(void)
++{
++	return s1g_alpha2;
++}
++
++int nrc_is_eu(const char* alpha2)
++{
++	int i;
++
++	for(i=0;i<NUM_EU_COUNTRIES;i++)
++	{
++		if (alpha2[0] == eu_map[i].alpha2[0] && 
++			alpha2[1] == eu_map[i].alpha2[1]) {
++			nrc_dbg(NRC_DBG_S1G, "%s %s is EU\n", __func__, alpha2);
++			return 1;
++		}
++	}
++
++	nrc_dbg(NRC_DBG_S1G, "%s %s is _NOT_ EU\n", __func__, alpha2);
++
++	return 0;
++}
++
++void nrc_s1g_set_channel_bw(struct cfg80211_chan_def *chandef)
++{
++	int w;
++
++	w = nrc_s1g_width(nrc_get_s1g_country(), FREQ_TO_100KHZ(chandef->chan->center_freq,
++				chandef->chan->freq_offset));
++	switch(w)
++	{
++		default:
++		case 1:
++			chandef->width = NL80211_CHAN_WIDTH_1;
++			break;
++		case 2:
++			chandef->width = NL80211_CHAN_WIDTH_2;
++			break;
++		case 4:
++			chandef->width = NL80211_CHAN_WIDTH_4;
++			break;
++	}
++}
++#endif /* CONFIG_S1G_CHANNEL */
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.h b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.h
+new file mode 100644
+index 0000000..dcbcdc3
+--- /dev/null
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-s1g.h
+@@ -0,0 +1,46 @@
++/*
++//  * Copyright (c) 2021 James Ewing jim@droidifi.com
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef _NRC_S1G_H_
++#define _NRC_S1G_H_
++
++#include "nrc.h"
++#include <linux/types.h>
++#include <stddef.h>
++
++#define FREQ_TO_100KHZ(mhz, khz) (mhz * 10 + khz / 100)
++
++extern char * fw_country;
++
++struct nrc_s1g_map {
++	char alpha2[3];
++	int s1g_freq;
++	int fw_freq;
++	int channel;
++	int width; 
++};
++
++int nrc_get_s1g_freq(const char* alpha2, int ch);
++int nrc_freq_fw_s1g(const char* alpha2, int fw_freq);
++int nrc_freq_s1g_fw(const char* alpha2, int s1g_freq);
++int nrc_s1g_width(const char* alpha2, int s1g_freq);
++int nrc_num_channels(const char* alpha2);
++void nrc_remap_status(const char* alpha2, struct ieee80211_rx_status *status);
++void nrc_set_s1g_country(const char* alpha2);
++const char* nrc_get_s1g_country(void);
++int nrc_is_eu(const char* alpha2);
++void nrc_s1g_set_channel_bw(struct cfg80211_chan_def *chandef);
++#endif
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-trx.c b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-trx.c
+index 838a87d..f849020 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/nrc-trx.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/nrc-trx.c
+@@ -40,7 +40,7 @@
+ #include "nrc-stats.h"
+ #include "compat.h"
+ #include "nrc-vendor.h"
+-
++#include "nrc-s1g.h"
+ 
+ /* TX */
+ 
+@@ -270,7 +270,6 @@ static int tx_h_put_iv(struct nrc_trx_data *tx)
+ }
+ TXH(tx_h_put_iv, NL80211_IFTYPE_ALL);
+ 
+-
+ /* RX */
+ 
+ static void nrc_mac_rx_h_status(struct nrc *nw, struct sk_buff *skb)
+@@ -290,6 +289,13 @@ static void nrc_mac_rx_h_status(struct nrc *nw, struct sk_buff *skb)
+ 	status->band = nw->band; /* I hate this */
+ 	status->rate_idx = 0;
+ 
++	nrc_mac_dbg("%s: status->band  %d\n",__func__, status->band );
++    
++#ifdef CONFIG_S1G_CHANNEL
++	// firmware puts bogus frequency info into skb header, need to remap
++	nrc_remap_status(nw->alpha2, status);
++#endif
++
+ 	if (fh->flags.rx.error_mic)
+ 		status->flag |= RX_FLAG_MMIC_ERROR;
+ 	if (fh->flags.rx.iv_stripped)
+diff --git a/package/host/nrc_driver/source/nrc_driver/nrc/wim.c b/package/host/nrc_driver/source/nrc_driver/nrc/wim.c
+index b0f2ffa..320fab7 100755
+--- a/package/host/nrc_driver/source/nrc_driver/nrc/wim.c
++++ b/package/host/nrc_driver/source/nrc_driver/nrc/wim.c
+@@ -21,7 +21,7 @@
+ #include "nrc-fw.h"
+ #include "nrc-recovery.h"
+ #include "nrc-mac80211.h"
+-
++#include "nrc-s1g.h"
+ 
+ static void nrc_wim_skb_bind_vif(struct sk_buff *skb, struct ieee80211_vif *vif)
+ {
+@@ -152,6 +152,7 @@ int nrc_wim_change_sta(struct nrc *nw, struct ieee80211_vif *vif,
+ 	return nrc_xmit_wim_request(nw, skb);
+ }
+ 
++#ifdef NRC_BUILD_USE_HWSCAN
+ int nrc_wim_hw_scan(struct nrc *nw, struct ieee80211_vif *vif,
+ 		    struct cfg80211_scan_request *req,
+ 		    struct ieee80211_scan_ies *ies)
+@@ -164,6 +165,9 @@ int nrc_wim_hw_scan(struct nrc *nw, struct ieee80211_vif *vif,
+ 		size += tlv_len(ies->common_ie_len);
+ 		size += ies->len[NL80211_BAND_2GHZ];
+ 		size += ies->len[NL80211_BAND_5GHZ];
++#ifdef  CONFIG_S1G_CHANNEL
++		size += ies->len[NL80211_BAND_S1GHZ];
++#endif
+ 	} else {
+ 		size += tlv_len(req->ie_len);
+ 	}
+@@ -179,7 +183,13 @@ int nrc_wim_hw_scan(struct nrc *nw, struct ieee80211_vif *vif,
+ 
+ 	p->n_channels = req->n_channels;
+ 	for (i = 0; i < req->n_channels; i++)
++    {
++#ifdef CONFIG_S1G_CHANNEL
++		p->channel[i] = nrc_freq_s1g_fw(nw->alpha2, FREQ_TO_100KHZ(req->channels[i]->center_freq, req->channels[i]->freq_offset));
++#else
+ 		p->channel[i] = req->channels[i]->center_freq;
++#endif
++    }
+ 
+ 	p->n_ssids = req->n_ssids;
+ 	for (i = 0; i < req->n_ssids; i++) {
+@@ -196,6 +206,9 @@ int nrc_wim_hw_scan(struct nrc *nw, struct ieee80211_vif *vif,
+ 					WIM_TLV_SCAN_PROBE_REQ_IE,
+ 					ies->common_ie_len +
+ 					ies->len[NL80211_BAND_2GHZ] +
++#ifdef  CONFIG_S1G_CHANNEL
++					ies->len[NL80211_BAND_S1GHZ] +
++#endif
+ 					ies->len[NL80211_BAND_5GHZ],
+ 					NULL);
+ 
+@@ -218,7 +231,7 @@ int nrc_wim_hw_scan(struct nrc *nw, struct ieee80211_vif *vif,
+ 
+ 	return nrc_xmit_wim_request(nw, skb);
+ }
+-
++#endif
+ 
+ static char *ieee80211_cipher_str(u32 cipher)
+ {

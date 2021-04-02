@@ -23,10 +23,17 @@ can be applied
 
 A ready-to-go SD card image for a Raspberry Pi model 3 or model 4 is available at:
 
-https://www.droidifi.com/2021-01-11-raspios-buster-armhf_newracom_8GB.img.zip 
+https://www.droidifi.com/2021-04-02-raspios-buster-armhf_newracom_8GB.img.zip 
 
 The SD card image automatically loads the mac80211.ko and nrc.ko modules. The cli_app is included. 
-After booting assign an IP addres to the wlan1 interface and run either wpa_supplicant or hostapd.
+After booting assign an IP address to the wlan1 interface and run either wpa_supplicant or hostapd.
+
+The default country is 'US'. If you would like to use another country code, edit the file in
+/mnt/rootfs/etc/modprobe.d/nrc.conf and change the two letter country to one of [US, EU, JP, KR, TW, CN] 
+in the "fw_country=US" module parameter. You will also need to edit the 
+/etc/wpa_supplicant/sta_halow_sae_s1g.conf or /etc/hostapd/ap_halow_sae_s1g.conf file. 
+Actual EU country codes such as DE, FR, SE, GB, etc must be used for wpa_supplicant and hostapd. 
+They will automatically be translated to 'EU' for the Newracom firmware.
 
 # Building
 
@@ -124,12 +131,12 @@ The newracom.dtbo file should be copied to the [path]/boot/overlays directory.
 Load the modules
 ```
 sudo modprobe mac80211
-sudo insmod /lib/modules/$(uname -r)/extra/nrc.ko fw_name=nrc7292_cspi.bin hifspeed=16000000 
+sudo insmod /lib/modules/$(uname -r)/extra/nrc.ko fw_name=nrc7292_cspi.bin hifspeed=16000000 fw_country=[US,EU,JP,TW,KR,CN]
 ```
-Adjust the driver Wi-Fi parameters
+Adjust the driver Wi-Fi parameters (optional)
 ```
 sudo cli_app set maxagg 1 8
-sudo cli_app set txpwr 17
+sudo cli_app set txpwr 23
 sudo cli_app set gi short
 ```
 Running the hostapd soft Access Point
