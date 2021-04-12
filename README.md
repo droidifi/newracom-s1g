@@ -49,6 +49,8 @@ https://github.com/droidifi/linux.git
 
 https://github.com/droidifi/nrc7292_sw_pkg.git
 
+Make sure you checkout the linux-5.10.x-S1G branch.
+
 ## wireless-regdb
 
 Run "make && make install"
