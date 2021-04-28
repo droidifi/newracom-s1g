@@ -33,7 +33,7 @@ The default country is 'EU'. If you would like to use another country code, edit
 in the "fw_country=EU" module parameter. You will also need to edit the 
 /etc/wpa_supplicant/sta_halow_sae_s1g.conf or /etc/hostapd/ap_halow_sae_s1g.conf file. 
 If using an EU country, actual country codes such as DE, FR, SE, GB, etc must be used for wpa_supplicant and hostapd. 
-They will automatically be translated to 'EU' for the Newracom firmware. Otherwise us US, JP, KR, TW or CN directly.
+They will automatically be translated to 'EU' for the Newracom firmware. Otherwise use US, JP, KR, TW or CN directly.
 
 # Building
 
